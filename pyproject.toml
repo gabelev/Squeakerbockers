@@ -11,4 +11,5 @@ dependencies = [
     "torch>=2.4",
     "numpy>=1.26",
     "opencv-python-headless>=4.10",
+    "lap>=0.5.13",
 ]

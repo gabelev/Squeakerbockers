@@ -4,9 +4,10 @@ Contract:
     PoseModel(model_name).detect(frame)              -> list[Detection]
     PoseModel(model_name).detect_with_overlay(frame) -> (list[Detection], np.ndarray)
 
-Backed by ultralytics yolo11n-pose. Load weights once at construction —
-the model is heavy; construct from a module-level singleton, not per
-connection. See SPEC §5 (pose.py) and §3 (handler copy()).
+Backed by ultralytics yolo11n-pose with the built-in tracker
+(`model.track(..., persist=True)`) so per-person identity persists across
+frames — needed by features.py for foot velocity and pivot sharpness.
+Load weights once at construction; construct from a module-level singleton.
 """
 from __future__ import annotations
 
@@ -15,7 +16,6 @@ from dataclasses import dataclass
 import numpy as np
 from ultralytics import YOLO
 
-# COCO-17 keypoint names in the order YOLO returns them.
 KEYPOINT_NAMES = (
     "nose",
     "left_eye", "right_eye",
@@ -31,9 +31,10 @@ KEYPOINT_NAMES = (
 
 @dataclass
 class Detection:
-    keypoints: dict  # name -> (x, y, confidence)
-    bbox: tuple      # (x1, y1, x2, y2)
-    center: tuple    # (cx, cy)
+    keypoints: dict           # name -> (x, y, confidence)
+    bbox: tuple               # (x1, y1, x2, y2)
+    center: tuple             # (cx, cy)
+    track_id: int | None = None
 
 
 def _as_uint8(frame: np.ndarray) -> np.ndarray:
@@ -57,16 +58,23 @@ class PoseModel:
     def _result_to_detections(self, result) -> list[Detection]:
         if result.keypoints is None or result.keypoints.data is None:
             return []
-        kpts = result.keypoints.data.cpu().numpy()  # [N, 17, 3] -> (x, y, conf)
+        kpts = result.keypoints.data.cpu().numpy()  # [N, 17, 3]
         boxes = (
             result.boxes.xyxy.cpu().numpy()
             if result.boxes is not None
             else None
         )
+        ids = None
+        if result.boxes is not None and result.boxes.id is not None:
+            ids = result.boxes.id.int().cpu().numpy()
         dets: list[Detection] = []
         for i, person in enumerate(kpts):
             named = {
-                KEYPOINT_NAMES[j]: (float(person[j, 0]), float(person[j, 1]), float(person[j, 2]))
+                KEYPOINT_NAMES[j]: (
+                    float(person[j, 0]),
+                    float(person[j, 1]),
+                    float(person[j, 2]),
+                )
                 for j in range(len(KEYPOINT_NAMES))
             }
             if boxes is not None and i < len(boxes):
@@ -74,18 +82,32 @@ class PoseModel:
             else:
                 x1 = y1 = x2 = y2 = 0.0
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-            dets.append(Detection(keypoints=named, bbox=(x1, y1, x2, y2), center=(cx, cy)))
+            tid = int(ids[i]) if (ids is not None and i < len(ids)) else None
+            dets.append(
+                Detection(
+                    keypoints=named,
+                    bbox=(x1, y1, x2, y2),
+                    center=(cx, cy),
+                    track_id=tid,
+                )
+            )
         return dets
 
-    def detect(self, frame: np.ndarray, conf: float = 0.15) -> list[Detection]:
-        results = self._model(_as_uint8(frame), conf=conf, verbose=False)
+    def detect(
+        self, frame: np.ndarray, conf: float = 0.15, imgsz: int = 416
+    ) -> list[Detection]:
+        results = self._model.track(
+            _as_uint8(frame), conf=conf, imgsz=imgsz, persist=True, verbose=False
+        )
         return self._result_to_detections(results[0])
 
     def detect_with_overlay(
-        self, frame: np.ndarray, conf: float = 0.15
+        self, frame: np.ndarray, conf: float = 0.15, imgsz: int = 416
     ) -> tuple[list[Detection], np.ndarray]:
         img = _as_uint8(frame)
-        results = self._model(img, conf=conf, verbose=False)
+        results = self._model.track(
+            img, conf=conf, imgsz=imgsz, persist=True, verbose=False
+        )
         detections = self._result_to_detections(results[0])
-        annotated = results[0].plot()  # uint8, same colorspace as input
+        annotated = results[0].plot()
         return detections, annotated
