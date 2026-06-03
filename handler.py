@@ -1,38 +1,44 @@
 """FastRTC handler for Squeakerbockers.
 
-Phase 2b: pass-through video + fixed sine wave audio. Proves the
-AsyncAudioVideoStreamHandler shape on the wire before pose, features,
-RAVE, or control land. Each later phase replaces one method:
+Phase 5: emit() now decodes a fixed RAVE latent slice instead of a sine wave.
+Pose still runs in video_receive, skeleton overlay returned via video_emit.
 
-- P3: video_receive runs pose, writes state.overlay_frame
-- P4: video_receive also writes state.features
-- P5: emit calls RAVEEngine.decode instead of sin()
-- P6: emit reads state.features, controller maps to latent, RAVE decodes
+Remaining wiring per SPEC §3:
+- P4: video_receive also writes state.features.
+- P6: emit reads state.features, controller maps to latent, RAVE decodes.
 """
 from __future__ import annotations
 
-import math
+import asyncio
 
 import numpy as np
 from fastrtc import AsyncAudioVideoStreamHandler
 
-OUTPUT_SAMPLE_RATE = 48_000  # matches the placeholder RAVE model (z8, r48000)
-SINE_FREQ_HZ = 440.0         # A4, easy to confirm by ear
-SINE_AMPLITUDE = 0.2         # leaves headroom
-SINE_CHUNK = 960             # 20 ms at 48 kHz, matches WebRTC framing
+from config import POSE_MODEL, RAVE_MODEL_PATH
+from pose import PoseModel
+from rave_engine import RAVEEngine
+
+# Module-level heavy loads (survive handler.copy()).
+_pose = PoseModel(POSE_MODEL)
+_pose.warmup()
+_rave = RAVEEngine(RAVE_MODEL_PATH)
+
+# Latent ticks decoded per emit() call. T=2 -> 1024 samples at hop=512.
+LATENT_TICKS_PER_EMIT = 2
+# RAVE outputs sit at low amplitude (~±0.02 here); a fixed gain makes the
+# placeholder audibly present without clipping.
+OUTPUT_GAIN = 8.0
 
 
 class SqueakerHandler(AsyncAudioVideoStreamHandler):
     def __init__(self) -> None:
         super().__init__(
             expected_layout="mono",
-            output_sample_rate=OUTPUT_SAMPLE_RATE,
-            output_frame_size=SINE_CHUNK,
+            output_sample_rate=_rave.sample_rate,
             input_sample_rate=48_000,
             fps=30,
         )
-        self._last_frame: np.ndarray | None = None
-        self._sine_n: int = 0  # running sample index for phase continuity
+        self._last_overlay: np.ndarray | None = None
 
     def copy(self) -> "SqueakerHandler":
         return SqueakerHandler()
@@ -42,25 +48,26 @@ class SqueakerHandler(AsyncAudioVideoStreamHandler):
 
     # --- video --------------------------------------------------------
     async def video_receive(self, frame: np.ndarray) -> None:
-        self._last_frame = frame
+        # YOLO is CPU-bound; off-thread so audio cadence is not blocked.
+        _, annotated = await asyncio.to_thread(_pose.detect_with_overlay, frame)
+        self._last_overlay = annotated
 
     async def video_emit(self) -> np.ndarray:
-        if self._last_frame is None:
+        if self._last_overlay is None:
             return np.zeros((480, 640, 3), dtype=np.uint8)
-        f = self._last_frame
-        if f.dtype == np.float32:
-            scale = 255.0 if f.max() <= 1.0 else 1.0
-            f = np.clip(f * scale, 0, 255).astype(np.uint8)
-        return f
+        return self._last_overlay
 
     # --- audio --------------------------------------------------------
     async def receive(self, frame: tuple[int, np.ndarray]) -> None:
         return None  # mic input unused
 
     async def emit(self) -> tuple[int, np.ndarray]:
-        n0 = self._sine_n
-        ts = np.arange(n0, n0 + SINE_CHUNK) / OUTPUT_SAMPLE_RATE
-        wave = SINE_AMPLITUDE * np.sin(2 * math.pi * SINE_FREQ_HZ * ts)
-        self._sine_n = n0 + SINE_CHUNK
-        audio = (wave * 32767).astype(np.int16)
-        return (OUTPUT_SAMPLE_RATE, audio)
+        # P5: decode a fixed nonzero latent so there is audible output to
+        # verify against. Drives the first two PCA-aligned latent dims;
+        # P6 replaces these constants with feature-driven values.
+        z = np.zeros((1, _rave.latent_dim, LATENT_TICKS_PER_EMIT), dtype=np.float32)
+        z[0, 0, :] = 1.5
+        z[0, 1, :] = -0.5
+        audio = _rave.decode(z) * OUTPUT_GAIN
+        audio_i16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+        return (_rave.sample_rate, audio_i16)
