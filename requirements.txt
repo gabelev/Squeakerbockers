@@ -1,0 +1,6 @@
+gradio>=5.0
+fastrtc>=0.0.20
+ultralytics>=8.3
+torch>=2.4
+numpy>=1.26
+opencv-python-headless>=4.10

@@ -1,0 +1,15 @@
+[project]
+name = "squeakerbockers"
+version = "0.1.0"
+description = "Realtime generative audio: webcam pose drives a streaming RAVE model trained on shoe-squeak / court foley."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "gradio>=5.0",
+    "fastrtc>=0.0.20",
+    "ultralytics>=8.3",
+    "torch>=2.4",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.10",
+    "lap>=0.5.13",
+]
