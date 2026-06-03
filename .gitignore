@@ -224,3 +224,10 @@ models/
 *.ts
 *.pt
 
+# Training workstream artifacts — local dataset + training runs are huge,
+# not tracked in git.
+data/
+runs/
+*.csv
+squeak-data.tar.gz
+
