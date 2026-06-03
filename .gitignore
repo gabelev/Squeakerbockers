@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Squeakerbockers ----------------------------------------------------
+# RAVE TorchScript checkpoints and YOLO weights — downloaded at setup,
+# not tracked in git.
+models/
+*.ts
+*.pt
+
