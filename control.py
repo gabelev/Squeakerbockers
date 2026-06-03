@@ -1,27 +1,25 @@
 """Map features -> RAVE latent slice with smoothing.
 
 Drives the first two latent dimensions from the loudest features
-(pivot_sharpness and motion_energy), fills the rest with low-amp noise,
-and smooths the trajectory across emit calls to suppress zipper noise.
+(pivot_sharpness and motion_energy), leaves the rest at zero, and smooths
+the trajectory across emit calls to suppress zipper noise.
 
 Contract:
     Controller(latent_dim).step(features, T) -> np.ndarray [1, latent_dim, T]
 
-The character of the sound lives here; tune by ear at P7.
+The character of the sound lives here; gains and smoothing are pulled
+live from tunables.t so UI sliders can adjust without restarting.
 """
 from __future__ import annotations
 
 import numpy as np
 
 from config import (
-    LATENT_SMOOTH_ALPHA,
     MOTION_ENERGY_SCALE,
-    MOTION_GAIN,
-    NOISE_DIMS_SCALE,
-    PIVOT_GAIN,
     PIVOT_SHARPNESS_SCALE,
 )
 from state import Features
+from tunables import t
 
 _LATENT_CLIP = 3.0
 
@@ -35,7 +33,7 @@ class Controller:
         target = np.zeros(self.latent_dim, dtype=np.float32)
         target[0] = float(
             np.clip(
-                features.pivot_sharpness * PIVOT_SHARPNESS_SCALE * PIVOT_GAIN,
+                features.pivot_sharpness * PIVOT_SHARPNESS_SCALE * t.pivot_gain,
                 -_LATENT_CLIP,
                 _LATENT_CLIP,
             )
@@ -43,17 +41,13 @@ class Controller:
         if self.latent_dim > 1:
             target[1] = float(
                 np.clip(
-                    features.motion_energy * MOTION_ENERGY_SCALE * MOTION_GAIN,
+                    features.motion_energy * MOTION_ENERGY_SCALE * t.motion_gain,
                     -_LATENT_CLIP,
                     _LATENT_CLIP,
                 )
             )
-        # Non-driven dims left at 0 for now. Adding fresh np.random.randn() here
-        # every emit (~50Hz) sounds like static after smoothing — a slow LFO is
-        # the right fix if we want organic motion in P7. NOISE_DIMS_SCALE stays
-        # in config for that future tuning.
 
-        alpha = LATENT_SMOOTH_ALPHA
+        alpha = t.smooth_alpha
         self._z = (alpha * self._z + (1.0 - alpha) * target).astype(np.float32)
 
         z_slice = np.broadcast_to(

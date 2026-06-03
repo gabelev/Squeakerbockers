@@ -19,6 +19,7 @@ from features import FeatureExtractor
 from pose import PoseModel
 from rave_engine import RAVEEngine
 from state import state
+from tunables import t
 
 # Module-level heavy loads (survive handler.copy()).
 _pose = PoseModel(POSE_MODEL)
@@ -32,10 +33,7 @@ _controller = Controller(_rave.latent_dim)
 # never overproduce relative to what fastrtc consumes.
 WEBRTC_FRAME = int(_rave.sample_rate * 0.02)
 
-# RAVE outputs amplitude varies by model; gain brings them into a comfortable
-# level. Organ is much louder than bird (more harmonic energy at the same z).
-# tanh is applied after gain so loud peaks saturate cleanly rather than crackling.
-OUTPUT_GAIN = 3.0
+# OUTPUT_GAIN is pulled live from tunables.t so the UI slider can change it.
 
 
 class SqueakerHandler(AsyncAudioVideoStreamHandler):
@@ -100,7 +98,7 @@ class SqueakerHandler(AsyncAudioVideoStreamHandler):
             deficit = WEBRTC_FRAME - len(self._audio_buf)
             T = max(1, (deficit + _rave.hop_size - 1) // _rave.hop_size)
             z = _controller.step(state.features, T=T)
-            new_audio = _rave.decode(z) * OUTPUT_GAIN
+            new_audio = _rave.decode(z) * t.output_gain
             self._audio_buf = np.concatenate([self._audio_buf, new_audio])
         out = self._audio_buf[:WEBRTC_FRAME]
         self._audio_buf = self._audio_buf[WEBRTC_FRAME:]
