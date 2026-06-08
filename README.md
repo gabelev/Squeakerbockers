@@ -44,6 +44,34 @@ See [`SPEC.md`](./SPEC.md) for the full architecture and build phases.
 
 ---
 
+## The audio model
+
+RAVE is an autoencoder for audio. The **encoder** compresses waveforms
+down to a small latent `z` (the placeholder model uses `latent_dim=8`); the
+**decoder** synthesizes a waveform from any `z`. At inference we never feed
+audio in — we only call the decoder, with latents we build from movement
+features. There is no library of squeaks. The model holds a continuous
+latent space of squeak-shaped sounds, and `control.py` traces a path
+through it driven by what the body is doing; a sharp pivot jumps to a
+high-sharpness region and the decoder synthesizes a never-heard-before
+squeak in ~23 ms.
+
+Training (separate, on a rented RTX 4090 — see [`docs/training-runpod.md`](./docs/training-runpod.md))
+compresses ~3 hours of CC0 court/squeak audio into the geometry of that
+latent space. The official [`acids-rave`](https://github.com/acids-ircam/RAVE)
+package runs a VAE stage that learns smooth reconstruction, then an
+adversarial stage that adds the sharpness a plain VAE smears out. There
+is no fixed step count — pull the checkpoint when it sounds right.
+
+Export with `rave export --streaming`. The flag is non-negotiable: it
+replaces standard convolutions with **cached** ones that splice seamlessly
+across chunks; without it the realtime stream clicks at every boundary.
+The export is a single TorchScript `.ts` file. Dropping it into `models/`
+and updating one path in `config.py` is the entire swap — `rave_engine.py`
+introspects sample rate and latent dim from the file.
+
+---
+
 ## Models and the parameter budget
 
 | Component | Model | Params |
