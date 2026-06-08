@@ -55,15 +55,33 @@ Cloud. Ends with one streaming-exported `.ts` file we drop into `models/`.
 ```bash
 cd /workspace
 
-# Upload squeak-data.tar.gz (via RunPod web UI or runpodctl), then:
+# Upload squeak-data.tar.gz (via RunPod web UI, runpodctl, or scp
+# over the pod's direct-TCP SSH endpoint), then:
 tar -xzf squeak-data.tar.gz
-ls data/clean/ | head -5
+# tar warnings about uid/gid and LIBARCHIVE.xattr.* are benign
+# (macOS-created tar; files extract fine).
 
-# Official ACIDS/IRCAM RAVE package
-pip install acids-rave
+# Strip macOS AppleDouble metadata (._*) — RAVE preprocess will
+# try to read them as audio and silently die.
+find clean -name '._*' -delete
+
+# Apt deps: RAVE preprocess shells out to ffmpeg/ffprobe.
+apt-get update -qq && apt-get install -y -qq ffmpeg tmux
+
+# Official ACIDS/IRCAM RAVE package.
+# --ignore-installed pushes past the distutils-installed `blinker`
+# package that ships with Ubuntu 22.04 and otherwise aborts the install.
+pip install --ignore-installed acids-rave
+
+# acids-rave pulls in a torchaudio that wants CUDA 13 (libcudart.so.13)
+# but the runpod/pytorch image is CUDA 12.4. Pin both back to 2.4.1+cu124
+# (they have to match each other and the image's CUDA).
+pip install --no-deps torch==2.4.1 torchaudio==2.4.1 \
+    --index-url https://download.pytorch.org/whl/cu124
 
 # Smoke check
 rave --help
+python -c "import torch, torchaudio; print(torch.__version__, torchaudio.__version__, torch.cuda.is_available())"
 ```
 
 ## Preprocess with RAVE (one-time)
@@ -83,18 +101,38 @@ Takes a few minutes for 1-3 hours of audio.
 
 ## Train
 
+Run inside a tmux session so SSH drops don't kill the training:
+
 ```bash
+tmux new -s train
 cd /workspace
 rave train \
     --config v2 \
     --db_path data/preprocessed/ \
     --name squeakerbockers \
     --out_path runs/ \
-    --gpu 0
+    --gpu 0 \
+    --channels 1 \
+    --override SAMPLING_RATE=48000 \
+    2>&1 | tee /workspace/train.log
+# detach: Ctrl-b d
+# reattach later: tmux attach -t train
 ```
 
 `--config v2` is the same RAVE v2 architecture used by the placeholder
 model. Checkpoints go to `runs/squeakerbockers/`.
+
+Two flags that are easy to miss:
+
+- **`--channels 1`** — `rave train --help` lists the default as `0`,
+  not `1`. Omitting it makes `GeneratorV2`'s final Conv1d have 0 output
+  channels, and `weight_norm` aborts with
+  *"cannot reshape tensor of 0 elements into shape [0, -1]"*.
+- **`--override SAMPLING_RATE=48000`** — `v2.gin` hardcodes
+  `SAMPLING_RATE = 44100`. If the preprocessed LMDB is at 48000 and the
+  config is at 44100, validation crashes on the first epoch with
+  *"size of tensor a (236) must match the size of tensor b (237)"* —
+  the multi-scale STFT comes out one frame short.
 
 ### Listen to checkpoints — don't wait for a step count
 
@@ -111,7 +149,10 @@ runpodctl receive /workspace/runs/squeakerbockers/version_0/audio
 If your pod dies:
 
 1. Spin up a new pod, same spec, mount the same persistent volume.
-2. `pip install acids-rave` again.
+2. Re-run the full Setup block above (the four installs — ffmpeg, the
+   `--ignore-installed` acids-rave, the torch/torchaudio pin, the tmux
+   session). The persistent volume keeps `runs/` and `preprocessed/`;
+   the container disk does not keep the apt/pip installs.
 3. Re-run the same `rave train` command — it auto-resumes from the
    latest checkpoint in `runs/squeakerbockers/`.
 
