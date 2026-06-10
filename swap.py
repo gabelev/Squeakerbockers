@@ -27,6 +27,7 @@ import imageio.v3 as iio
 import insightface
 import numpy as np
 from insightface.app import FaceAnalysis
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 SWAPPER_PATH = PROJECT_ROOT / "models" / "inswapper_128.onnx"
@@ -91,8 +92,15 @@ class FaceSwapper:
         # Container will be inferred from suffix; codec defaults to libx264
         writer.init_video_stream("libx264", fps=fps)
 
+        # Count frames first so the progress bar has a total.
+        n_frames = sum(1 for _ in iio.imiter(str(target_video), plugin="pyav"))
         try:
-            for frame in iio.imiter(str(target_video), plugin="pyav"):
+            for frame in tqdm(
+                iio.imiter(str(target_video), plugin="pyav"),
+                total=n_frames,
+                desc="swap",
+                unit="f",
+            ):
                 # imageio gives RGB; insightface/cv2 expect BGR.
                 bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 tgt = self._largest_face(bgr)
