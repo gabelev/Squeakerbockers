@@ -8,10 +8,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.resolve()
 
 # Models -------------------------------------------------------------
-# Placeholder until the trained squeak model lands. Streaming-exported
-# RAVE .ts from Intelligent-Instruments-Lab/rave-models on Hugging Face.
-# See SPEC.md §9 for the naming convention and alternates.
-RAVE_MODEL_PATH = PROJECT_ROOT / "models" / "organ_archive_b2048_r48000_z16.ts"
+# Trained squeak/court model. Streaming-exported via `rave export --streaming`
+# from the RAVE v2 run on RunPod. See docs/training-runpod.md.
+RAVE_MODEL_PATH = PROJECT_ROOT / "models" / "squeakerbockers.ts"
 POSE_MODEL = "yolo11n-pose.pt"
 
 # Inference resolution for YOLO pose. Lower = faster + lower-latency overlay.
@@ -38,7 +37,7 @@ LATENT_SMOOTH_ALPHA = 0.2  # 0 = no smoothing, 1 = frozen
 # These are empirical scales; tune in P7.
 MOTION_ENERGY_SCALE = 1.0 / 25.0
 PIVOT_SHARPNESS_SCALE = 1.0 / 50.0
-NOISE_DIMS_SCALE = 0.1  # amplitude of low-amp noise in non-driven latent dims
+NOISE_DIMS_SCALE = 0.6  # un-driven latent dims; RAVE PCA is unit-variance, so ~0.5-1.0 lives on the manifold
 
 # UI defaults --------------------------------------------------------
 UI_SENSITIVITY = 1.0
