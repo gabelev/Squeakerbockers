@@ -1,6 +1,14 @@
+# Face-swap app (app_swap.py) — deps for a Hugging Face Space.
+# The old realtime-audio app (app.py) additionally needs: fastrtc, ultralytics,
+# torch, soundfile. Those are in pyproject.toml for local dev via `uv sync`.
 gradio>=5.0
-fastrtc>=0.0.20
-ultralytics>=8.3
-torch>=2.4
-numpy>=1.26
+insightface>=1.0.1
+onnxruntime>=1.26.0
 opencv-python-headless>=4.10
+imageio>=2.37.3
+imageio-ffmpeg>=0.6.0
+# PyAV: swap.py reads/writes video via imageio's pyav plugin. Previously only
+# present transitively through fastrtc->aiortc; declared explicitly so the
+# Space (which drops fastrtc) still has it.
+av>=12
+numpy>=1.26
