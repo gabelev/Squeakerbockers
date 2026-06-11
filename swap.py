@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable
+from typing import Callable
 
 import cv2
 import imageio.v3 as iio
@@ -70,12 +70,14 @@ class FaceSwapper:
         target_video: Path,
         out_video: Path,
         keep_audio: bool = True,
+        progress_cb: Callable[[int, int], None] | None = None,
     ) -> Path | None:
         """Swap the source face into every frame of target_video.
 
         Frames where no face is detected pass through unchanged. Audio is
         muxed back from the source video at the end if keep_audio=True
-        and ffmpeg is on PATH.
+        and ffmpeg is on PATH. ``progress_cb(done, total)`` is called once
+        per frame if provided (e.g. to drive a UI progress bar).
         """
         src_face = self._largest_face(source_img)
         if src_face is None:
@@ -95,18 +97,20 @@ class FaceSwapper:
         # Count frames first so the progress bar has a total.
         n_frames = sum(1 for _ in iio.imiter(str(target_video), plugin="pyav"))
         try:
-            for frame in tqdm(
+            for i, frame in enumerate(tqdm(
                 iio.imiter(str(target_video), plugin="pyav"),
                 total=n_frames,
                 desc="swap",
                 unit="f",
-            ):
+            )):
                 # imageio gives RGB; insightface/cv2 expect BGR.
                 bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 tgt = self._largest_face(bgr)
                 if tgt is not None:
                     bgr = self.swapper.get(bgr, tgt, src_face, paste_back=True)
                 writer.write_frame(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+                if progress_cb is not None:
+                    progress_cb(i + 1, n_frames)
         finally:
             writer.close()
 
